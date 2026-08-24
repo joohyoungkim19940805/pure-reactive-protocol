@@ -1,0 +1,12 @@
+[package]
+name = "pure-reactive-protocol-kernel"
+version = "0.0.1-alpha"
+edition = "2021"
+license = "Apache-2.0"
+description = "Optional PRP/1 Rust/Wasm protocol kernel for @byeolnaerim/pure-reactive-protocol"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"

@@ -1,0 +1,116 @@
+{
+  "name": "@byeolnaerim/pure-reactive-protocol",
+  "version": "0.0.1-alpha",
+  "description": "A transport-independent reactive protocol runtime for browser and Node.js runtimes",
+  "license": "Apache-2.0",
+  "author": "Joohyoung Kim (@oozu1994)",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.4"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./core": {
+      "types": "./dist/core.d.ts",
+      "import": "./dist/core.js",
+      "require": "./dist/core.cjs"
+    },
+    "./transport": {
+      "types": "./dist/transport.d.ts",
+      "import": "./dist/transport.js",
+      "require": "./dist/transport.cjs"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "import": "./dist/browser.js",
+      "require": "./dist/browser.cjs"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js",
+      "require": "./dist/node.cjs"
+    },
+    "./profile/rpc": {
+      "types": "./dist/profile-rpc.d.ts",
+      "import": "./dist/profile-rpc.js",
+      "require": "./dist/profile-rpc.cjs"
+    },
+    "./rxjs": {
+      "types": "./dist/rxjs.d.ts",
+      "import": "./dist/rxjs.js",
+      "require": "./dist/rxjs.cjs"
+    },
+    "./compatibility/rsocket-v1": {
+      "types": "./dist/compatibility-rsocket-v1.d.ts",
+      "import": "./dist/compatibility-rsocket-v1.js",
+      "require": "./dist/compatibility-rsocket-v1.cjs"
+    },
+    "./compatibility/rsocket-v1/node": {
+      "types": "./dist/compatibility-rsocket-v1-node.d.ts",
+      "import": "./dist/compatibility-rsocket-v1-node.js",
+      "require": "./dist/compatibility-rsocket-v1-node.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "rust-kernel",
+    "compatibility",
+    "README.md",
+    "PHILOSOPHY.md",
+    "ARCHITECTURE.md",
+    "PROTOCOL.md",
+    "DX.md",
+    "ROADMAP.md",
+    "SECURITY.md",
+    "VALIDATION.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test && npm run build",
+    "build:wasm": "wasm-pack build rust-kernel --target web --release --out-dir ../wasm-dist",
+    "prepack": "npm run check"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "rxjs": "^7.8.2",
+    "tsdown": "^0.22.14",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  },
+  "peerDependencies": {
+    "rxjs": ">=7.8 <9"
+  },
+  "peerDependenciesMeta": {
+    "rxjs": {
+      "optional": true
+    }
+  },
+  "keywords": [
+    "reactive",
+    "protocol",
+    "duplex",
+    "streaming",
+    "backpressure",
+    "websocket",
+    "webtransport",
+    "http2",
+    "tcp",
+    "rsocket",
+    "rxjs",
+    "browser",
+    "node"
+  ]
+}
