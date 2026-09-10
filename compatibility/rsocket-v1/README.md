@@ -23,6 +23,7 @@ The public goal is not a second RSocket-shaped application API. `connectRSocket(
 - routing metadata;
 - metadata push;
 - WebSocket message-boundary use through the normal PRP `WebSocketTransport`;
+- one reliable WebTransport bidirectional stream with RSocket unsigned 24-bit framing;
 - RSocket 24-bit length-prefixed ordered byte streams;
 - Node accepted `Duplex`, TCP and TLS client transports;
 - symmetric requests after connection establishment.
@@ -59,6 +60,21 @@ import { RSocketTcpTransport } from "@byeolnaerim/pure-reactive-protocol/compati
 const session = await connectRSocket(new RSocketTcpTransport({ host: "localhost", port: 7000 }));
 ```
 
+## Browser / WebTransport
+
+```ts
+import {
+  connectRSocket,
+  RSocketWebTransportTransport
+} from "@byeolnaerim/pure-reactive-protocol/compatibility/rsocket-v1";
+
+const session = await connectRSocket(
+  new RSocketWebTransportTransport("https://host/rsocket")
+);
+```
+
+The carrier opens one reliable ordered bidirectional stream. RSocket frames are written directly with their 24-bit byte-stream prefix; native PRP framing is not involved.
+
 ## Validation boundary
 
-The compatibility layer has self/inter-transport tests and local TCP/byte-stream round trips. **Independent interoperability against Spring WebFlux/rsocket-java is intentionally the next test phase and is not claimed yet.**
+The compatibility layer has self/inter-transport tests and local TCP/byte-stream round trips. Independent Lab runs have also passed Spring WebFlux/rsocket-java interoperability over browser WebSocket and Node TCP, including a Spring `RSocketRequester` reverse request. The WebTransport carrier has deterministic framing/abort tests; browser-to-Java WebTransport is not claimed until the Lab is run with its HTTP/3 TLS endpoint.

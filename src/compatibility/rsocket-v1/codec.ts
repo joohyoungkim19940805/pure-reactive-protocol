@@ -110,7 +110,7 @@ export const encodeRSocketFrame = (frame: RSocketFrame): Uint8Array => {
   validateStreamId(frame.streamId);
   let flags = frame.flags ?? 0;
   if (frame.metadata) flags |= RSOCKET_FLAG_METADATA;
-  let body = new Uint8Array(0);
+  let body: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
   switch (frame.type) {
     case RSocketFrameType.SETUP: {
       if (frame.streamId !== 0 || !frame.setup) throw new RangeError("SETUP requires stream 0 and setup fields.");
@@ -155,7 +155,7 @@ export const encodeRSocketFrame = (frame: RSocketFrame): Uint8Array => {
       flags = 0;
       break;
     case RSocketFrameType.PAYLOAD:
-      if (frame.streamId === 0) throw new RangeError("PAYLOAD requires nonzero stream id.");
+      if (frame.streamId === 0) throw new RangeError("PAYLOAD requires nonzero stream id."); if ((flags & (RSOCKET_FLAG_NEXT | RSOCKET_FLAG_COMPLETE)) === 0) throw new RangeError("RSocket PAYLOAD must set NEXT, COMPLETE, or both.");
       body = encodeMetadataData(frame.metadata, frame.data);
       break;
     case RSocketFrameType.ERROR: {
@@ -267,9 +267,9 @@ export const decodeRSocketFrame = (input: Uint8Array): RSocketFrame => {
       if (streamId === 0 || input.byteLength !== offset) throw new RSocketProtocolError("Malformed CANCEL frame.");
       return { type, streamId, flags };
     case RSocketFrameType.PAYLOAD: {
-      if (streamId === 0) throw new RSocketProtocolError("PAYLOAD uses stream 0.");
-      // Fragment continuation PAYLOAD frames may carry only F/M. The session-level
-      // reassembler validates NEXT/COMPLETE after the logical frame is reconstructed.
+      if (streamId === 0) throw new RSocketProtocolError("PAYLOAD uses stream 0."); if ((flags & (RSOCKET_FLAG_NEXT | RSOCKET_FLAG_COMPLETE)) === 0) throw new RSocketProtocolError("RSocket PAYLOAD must set NEXT, COMPLETE, or both.");
+      // PAYLOAD always carries NEXT, COMPLETE, or both, including continuation frames while FOLLOWS is set.
+      // Reassembly still exposes the completed logical item only once to the application layer.
       const payload = decodeMetadataData(input, offset, metadataPresent);
       return { type, streamId, flags, ...(payload.metadata ? { metadata: payload.metadata } : {}), ...(payload.data.byteLength || (flags & RSOCKET_FLAG_NEXT) !== 0 ? { data: payload.data } : {}) };
     }

@@ -59,6 +59,51 @@ const waitFor = async (predicate: () => boolean, attempts = 100): Promise<void> 
 };
 
 describe("RSocket alpha closure conformance", () => {
+  it("sets NEXT on every fragmented PAYLOAD continuation", async () => {
+    const transport = new ManualRSocketTransport();
+    const session = await connectRSocket(transport, {
+      codec: binaryCodec,
+      keepAliveMs: 1000,
+      lifetimeMs: 5000,
+      maxFrameBytes: 128,
+      maxItemBytes: 2048
+    });
+    const rpc = new RpcPeer(session);
+    const pending = rpc.requestResponse<Uint8Array, Uint8Array>("fragment-wire", new Uint8Array(512));
+    const completion = expect(pending).resolves.toEqual(Uint8Array.of(7));
+
+    await waitFor(() => transport.writes.map(decodeRSocketFrame).some((frame) => frame.type === RSocketFrameType.PAYLOAD));
+    const written = transport.writes.map(decodeRSocketFrame);
+    const request = written.find((frame) => frame.type === RSocketFrameType.REQUEST_RESPONSE)!;
+    const continuations = written.filter((frame) => frame.streamId === request.streamId && frame.type === RSocketFrameType.PAYLOAD);
+    expect(continuations.length).toBeGreaterThan(0);
+    for (const fragment of continuations) expect((fragment.flags ?? 0) & RSOCKET_FLAG_NEXT).toBe(RSOCKET_FLAG_NEXT);
+
+    transport.incoming.push(encodeRSocketFrame({
+      type: RSocketFrameType.PAYLOAD,
+      streamId: request.streamId,
+      flags: RSOCKET_FLAG_NEXT | RSOCKET_FLAG_COMPLETE,
+      data: Uint8Array.of(7)
+    }));
+    await completion;
+    await session.close();
+  });
+
+  it("rejects PAYLOAD frames that set neither NEXT nor COMPLETE", () => {
+    expect(() => encodeRSocketFrame({
+      type: RSocketFrameType.PAYLOAD,
+      streamId: 1,
+      flags: RSOCKET_FLAG_FOLLOWS,
+      data: Uint8Array.of(1)
+    })).toThrow(/NEXT, COMPLETE/);
+
+    const invalid = new Uint8Array(7);
+    const view = new DataView(invalid.buffer);
+    view.setUint32(0, 1);
+    view.setUint16(4, (RSocketFrameType.PAYLOAD << 10) | RSOCKET_FLAG_FOLLOWS);
+    invalid[6] = 1;
+    expect(() => decodeRSocketFrame(invalid)).toThrow(RSocketProtocolError);
+  });
   it("fragments logical payloads larger than the 24-bit RSocket frame ceiling without pre-encoding them", async () => {
     const [left, right] = createMemoryTransportPair();
     const options = { codec: binaryCodec, keepAliveMs: 1000, lifetimeMs: 5000, maxFrameBytes: 1024 * 1024, maxItemBytes: 20 * 1024 * 1024 } as const;

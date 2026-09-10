@@ -117,7 +117,7 @@ export class WebSocketTransport implements ReactiveTransport {
               await new Promise<void>((resolve) => setTimeout(resolve, 1));
             }
             if (socket.readyState !== WebSocketCtor.OPEN) throw new Error("WebSocket is not open.");
-            socket.send(frame);
+            socket.send(new Uint8Array(frame));
           },
           close(reason): void {
             if (didClose) return;

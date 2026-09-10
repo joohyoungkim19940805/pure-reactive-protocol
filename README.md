@@ -42,6 +42,19 @@ for await (const message of stream) {
 
 Native sessions negotiate limits, fragmentation, liveness, and installed optional profiles before becoming ready. Idle healthy sessions are probed automatically; applications do not need a second keepalive API.
 
+### Browser / WebTransport
+
+```ts
+import { connect } from "@byeolnaerim/pure-reactive-protocol";
+import { WebTransportTransport } from "@byeolnaerim/pure-reactive-protocol/browser";
+
+const session = await connect(
+  new WebTransportTransport("https://example.com/prp")
+);
+```
+
+The alpha WebTransport carrier opens exactly one reliable bidirectional stream per session and applies native PRP/1 unsigned 32-bit byte-stream framing. Datagram and multi-lane scheduling are deliberately outside this transport revision.
+
 ## RPC/1 is an installed profile
 
 RPC is not part of the PRP core vocabulary. Both peers must install and negotiate `rpc/1` with the same payload codec.
@@ -101,27 +114,42 @@ const session = await connectRSocket(
 const rpc = new RpcPeer(session);
 ```
 
+### Browser / WebTransport
+
+```ts
+import {
+  connectRSocket,
+  RSocketWebTransportTransport
+} from "@byeolnaerim/pure-reactive-protocol/compatibility/rsocket-v1";
+
+const session = await connectRSocket(
+  new RSocketWebTransportTransport("https://example.com/rsocket")
+);
+```
+
+This path puts RSocket 1.0 directly on one WebTransport bidirectional byte stream with RSocket's unsigned 24-bit length prefix. It does not wrap RSocket in PRP or PRP in RSocket.
+
 The compatibility implementation covers RSocket 1.0 setup, periodic client keepalive, request-response, fire-and-forget, request-stream, request-channel, `REQUEST_N`, payload fragmentation/reassembly, cancel/error, metadata push, composite metadata, and routing metadata. Fragmentation is performed before whole-frame encoding, so one logical payload may exceed the 24-bit wire-frame ceiling while each emitted frame stays within the configured frame limit. Incomplete fragmented sequences are bounded by a session-wide byte budget and may be terminated by `CANCEL`/`ERROR` without corrupting the whole connection. Unknown frame types are skipped only when the RSocket IGNORE flag permits it, and requester stream IDs are validated as contiguous `+2` sequences. Lease and resume are not advertised or pretended to be implemented.
 
 Advanced compatibility deployments may tune `maxFrameBytes`, `maxItemBytes`, `maxInFlightReassemblyBytes`, `keepAliveMs`, `lifetimeMs`, and `handshakeTimeoutMs`. The defaults keep these resource/liveness concerns inside the compatibility session rather than leaking fragmentation mechanics into application APIs.
 
-**External interoperability with Spring WebFlux/rsocket-java is the next validation phase.** The current source contains the wire implementation and closure/conformance regression coverage needed to begin that test, but this README does not claim independent Spring interoperability before it has actually been run.
+Independent Lab runs have passed browser WebSocket and Node TCP interoperability against Spring WebFlux/rsocket-java, including reverse requests, cancellation, >16 MiB logical payload fragmentation, and periodic keepalive. Real browser-to-Java WebTransport execution remains a separate environment gate; the committed transport tests cover stream opening, framing, fragmentation boundaries, and abort cleanup without claiming that network run.
 
 ## Transport surfaces
 
 Current transport/adaptation surfaces include:
 
 - WebSocket
-- WebTransport reliable bidirectional stream
+- native PRP/1 over one WebTransport reliable bidirectional stream
 - generic Web `ReadableStream` / `WritableStream`
 - MessagePort / Worker bridging
 - Node TCP/TLS
 - Node HTTP/2 full-duplex stream
 - already-accepted Node `Duplex`
 - in-memory transport for protocol tests
-- RSocket 24-bit-framed byte-stream and Node TCP/TLS compatibility transports
+- RSocket 24-bit-framed WebTransport/byte-stream and Node TCP/TLS compatibility transports
 
-The native core asks for reliable ordered lane semantics, not a transport brand name.
+The native core asks for reliable ordered lane semantics, not a transport brand name. WebTransport currently exposes one base lane; negotiated multi-lane scheduling remains a later protocol phase.
 
 ## Resource safety
 

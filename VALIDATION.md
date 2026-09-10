@@ -42,34 +42,31 @@ This file separates implemented semantics, local regression evidence, declared-t
 - remote requester stream IDs validated as contiguous parity `+2`;
 - local wire stream IDs committed only after the initial request has actually been written;
 - RSocket 24-bit length-prefixed byte-stream framing and Node TCP/TLS/accepted-Duplex adapters.
+- native PRP/1 unsigned 32-bit and RSocket unsigned 24-bit framing over one WebTransport bidirectional stream.
 
 ## Local regression evidence for this snapshot
 
-The exact package dependencies could not be installed in this environment because npm registry access timed out. Therefore the following is **not** a claim that the package's actual Vitest/TypeScript-7/tsdown toolchain ran here.
+The declared npm dependencies were installed and the package's actual toolchain ran against the final source tree:
 
-What was run against the final source tree:
+- `tsc --noEmit`: pass;
+- Vitest: 11 files, 51 tests passed;
+- `tsdown`: ESM/CJS declarations and bundles built successfully;
+- WebTransport regressions cover native unsigned 32-bit framing, RSocket unsigned 24-bit framing, single-stream transport traits, and abort cleanup.
 
-- strict TypeScript 5.8.3 compile of generic/core/browser/profile/RSocket/test sources using a minimal Vitest declaration shim;
-- strict Node source compile using the Node 22 type declarations available in the environment;
-- strict RxJS adapter-shape compile using a minimal local RxJS declaration shim;
-- all 46 committed test cases executed through a small Vitest-compatible fallback runner: `TESTS 46 FAILED 0`;
-- focused alpha-closure runtime harness: `ALPHA_CLOSURE_HARNESS_PASS`;
-- actual localhost TCP compatibility round trip through `RSocketTcpTransport` and accepted `RSocketNodeDuplexTransport`, including a 3 MiB fragmented binary RPC payload: `RSOCKET_TCP_ALPHA_CLOSURE_PASS`.
+The committed tests also include direct regressions for: native unfragmented item limits, >16 MiB RSocket logical fragmentation, cancellation during fragmentation, PAYLOAD F+C, IGNORE, periodic KEEPALIVE, remote stream-ID skip, local wire-ID rollback, aggregate reassembly pressure, and 31-bit reserved-field rejection.
 
-The 46 committed tests include direct regressions for: native unfragmented item limits, >16 MiB RSocket logical fragmentation, cancellation during fragmentation, PAYLOAD F+C, IGNORE, periodic KEEPALIVE, remote stream-ID skip, local wire-ID rollback, aggregate reassembly pressure, and 31-bit reserved-field rejection.
+The separate PRP Alpha Lab has reported passing independent browser WebSocket and Node TCP paths against the PRP for Java candidate and Spring WebFlux/rsocket-java. That evidence includes native unary/stream/channel/fragmentation/cancel/error/liveness, RSocket reverse request, >16 MiB fragmentation, local wire-ID rollback, and periodic keepalive.
 
 ## Still required before removing `alpha`
 
 This snapshot does **not** yet claim independent interoperability with:
 
-- Spring WebFlux / rsocket-java;
-- browser-to-Spring RSocket over WebSocket;
-- Spring `RSocketRequester` -> PRP RSocket acceptor;
-- the full real WebSocket/WebTransport/TLS/HTTP2 endpoint matrix;
+- browser-to-Java WebTransport for native PRP/1 or RSocket 1.0;
+- the remaining real TLS/HTTP2 endpoint matrix;
 - long-running production soak/fault-injection results;
 - comparative raw WebSocket vs RSocket vs PRP performance results.
 
-It also does not claim that the exact declared npm build/test stack has run in this container. In normal CI/developer infrastructure, the first gate should be:
+In normal CI/developer infrastructure, the complete gate remains:
 
 ```bash
 npm install
@@ -80,4 +77,4 @@ npm run build:wasm
 
 `cargo`, `rustc`, and `wasm-pack` are unavailable in this environment, so the Rust/Wasm validator source can be kept aligned but was not compiled here.
 
-After that gate is green, execute the external interoperability matrix in `ROADMAP.md`. Only after those tests and the later performance/soak phase should the package drop the alpha label.
+After that gate is green, execute the remaining interoperability matrix in `ROADMAP.md`. Only after those tests and the later performance/soak phase should the package drop the alpha label.

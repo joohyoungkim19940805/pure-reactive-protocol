@@ -1,0 +1,11 @@
+라이브러리에서 pack 생성
+npm run build
+npm pack 
+
+버전 올리기
+npm version patch
+
+배포
+npm publish --tag alpha --access public
+
+npm dist-tag add @byeolnaerim/typed-rx-http@<version> latest

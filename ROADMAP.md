@@ -14,25 +14,29 @@ The protocol-shaping alpha implementation and the internal alpha-closure pass ar
 - closure regressions for native unfragmented item limits and the RSocket conformance cases that previously remained open;
 - browser and Node transport seams needed for the next test phase.
 
-## Phase 5 — external interoperability matrix
+## Phase 5 — external interoperability matrix (in progress)
 
 Run independent implementations, especially Spring WebFlux / rsocket-java, rather than only PRP-to-PRP compatibility sessions.
 
-Required paths:
+Verified in the PRP Alpha Lab:
 
 - Browser PRP native -> WebFlux PRP endpoint;
 - Next.js/Node PRP native -> WebFlux PRP endpoint;
 - Browser PRP public API -> RSocket compatibility -> Spring WebFlux RSocket over WebSocket;
 - Node PRP public API -> RSocket compatibility -> Spring WebFlux RSocket over TCP and/or WebSocket;
 - Spring `RSocketRequester` -> PRP RSocket compatibility acceptor;
-- browser WebSocket/WebTransport endpoint matrix;
+
+Remaining paths:
+
+- browser native PRP/1 -> WebTransport -> PRP for Java;
+- browser RSocket 1.0 -> WebTransport -> rsocket-java;
 - TLS and HTTP/2 endpoint matrix.
 
 Include malformed-peer, disconnect, half-open, cancellation, backpressure, fragmentation, and long-idle liveness cases.
 
 ## Phase 6 — performance and wire optimization
 
-Only after semantics and interoperability are stable, benchmark equal workloads across raw WebSocket, RSocket, native PRP, and PRP-over-RSocket compatibility.
+Only after semantics and interoperability are stable, benchmark equal workloads across raw WebSocket, RSocket, native PRP, and the PRP public API backed by RSocket compatibility.
 
 Measure at least:
 

@@ -220,8 +220,8 @@ const payloadSize = (frame: RSocketFrame): number => (frame.metadata?.byteLength
 
 /**
  * Splits request/PAYLOAD logical items according to RSocket's Follows rule. Metadata is always emitted before data.
- * The final PAYLOAD continuation carries NEXT/COMPLETE only for an original PAYLOAD; request continuations are
- * consumed by reassembly and do not become independent application PAYLOADs.
+ * Every PAYLOAD fragment carries NEXT as required by RSocket 1.0; Follows keeps fragments inside reassembly.
+ * COMPLETE is preserved only on the final fragment when the original logical frame completed its sending direction.
  */
 function frameEncodedBytes(frame: RSocketFrame): number {
   let extra = 0;
@@ -266,8 +266,8 @@ function* fragmentFrame(frame: RSocketFrame, maxFrameBytes: number): Generator<R
 
     const more = metadataOffset < metadata.byteLength || dataOffset < data.byteLength;
     let flags = more ? RSOCKET_FLAG_FOLLOWS : 0;
-    if (!more) {
-      if (frame.type === RSocketFrameType.PAYLOAD) flags |= originalSemanticFlags;
+    if (type === RSocketFrameType.PAYLOAD) flags |= RSOCKET_FLAG_NEXT; if (!more) {
+      if (frame.type === RSocketFrameType.PAYLOAD && (originalSemanticFlags & RSOCKET_FLAG_COMPLETE) !== 0) flags |= RSOCKET_FLAG_COMPLETE;
       else if (frame.type === RSocketFrameType.REQUEST_CHANNEL && (originalSemanticFlags & RSOCKET_FLAG_COMPLETE) !== 0) flags |= RSOCKET_FLAG_COMPLETE;
     }
     const fragment: RSocketFrame = {
