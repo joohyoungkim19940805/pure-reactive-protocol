@@ -63,3 +63,7 @@ A logical session and physical carrier are distinct concepts. Native clean close
 ## Routed native datagrams
 
 `datagram-routing/1` is a profile above `prp.core.datagram`, not a new reliable frame kind. The core exposes a datagram-acceptor integration point so profiles can claim matching native datagrams while unmatched datagrams remain available to the raw session API. Capability dependencies ensure the routing profile disappears automatically on carriers that do not expose a real best-effort/unordered lane.
+
+## Framework adapters
+
+Framework integrations compile framework-facing declarations into PRP application semantics; they do not redefine those semantics per carrier. For example, a Spring integration can scan one PRP-specific route annotation into a single application route registry and let native `rpc/1`, `datagram-routing/1`, and RSocket compatibility adapters consume that registry. MVC, WebFlux, controller style, or functional HTTP routing therefore remain host-framework concerns rather than protocol concepts. Transport-specific controller annotations are not part of the PRP core contract.
