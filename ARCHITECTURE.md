@@ -21,16 +21,20 @@ ReactiveSession / ReactiveStream
    |      RSocket interaction frames <-> generic stream patterns
    |      RSocket request-n / fragmentation / routing / keepalive
    |
-TransportConnection -> reliable ordered lane
+TransportConnection
+   +-- required reliable ordered lane
+   +-- optional best-effort unordered datagram lane
    |
-WebSocket | WebTransport | TCP/TLS | HTTP/2 | MessagePort | custom byte stream
+WebSocket | WebTransport | TCP/TLS | HTTP/2 | MessagePort | custom carrier
 ```
 
 ## Native core
 
 The core owns logical session/stream semantics. It does not own routing, JSON, RPC vocabulary, RxJS, HTTP methods, or transport-specific behavior.
 
-One session-level writer serializes sequence assignment and lane writes. Logical data fragmentation is core-owned so every profile gets the same item-level demand semantics without a profile-specific large-message API.
+One session-level writer serializes reliable-frame sequence assignment and reliable-lane writes. Logical data fragmentation is core-owned so every profile gets the same item-level demand semantics without a profile-specific large-message API.
+
+Native datagrams are deliberately outside that reliable writer. They are a separately negotiated `prp.core.datagram` lane with message boundaries, no PRP reliable sequence/stream ID, no fragmentation, and no delivery/order guarantee. A carrier cannot gain datagram capability by emulating it over its reliable lane.
 
 ## Profiles
 
@@ -55,3 +59,7 @@ RSocket requester/client keepalive is periodic as required by the compatibility 
 ## Session vs connection
 
 A logical session and physical carrier are distinct concepts. Native clean close is explicit; physical loss becomes `detached`. Resume/replay/migration are not yet implemented, so detached alpha sessions terminate pending work instead of pretending transparent recovery exists.
+
+## Routed native datagrams
+
+`datagram-routing/1` is a profile above `prp.core.datagram`, not a new reliable frame kind. The core exposes a datagram-acceptor integration point so profiles can claim matching native datagrams while unmatched datagrams remain available to the raw session API. Capability dependencies ensure the routing profile disappears automatically on carriers that do not expose a real best-effort/unordered lane.

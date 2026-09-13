@@ -6,7 +6,8 @@ import {
   CORE_LIVENESS_CAPABILITY_ID,
   capabilitiesFromAttributes,
   capabilitiesToAttributes,
-  negotiateCapabilities
+  negotiateCapabilities,
+  type CapabilityDescriptor
 } from "./capabilities";
 import { decodeFrame, encodeFrame, measureAttributeBytes } from "./codec";
 import {
@@ -20,8 +21,15 @@ import {
 import { DATA_FRAGMENTED_FLAG, FRAME_HEADER_BYTES, FrameKind, type ProtocolFrame } from "./frame";
 import { BOOTSTRAP_PROTOCOL_LIMITS, decodePeerProtocolLimits, type ProtocolLimits } from "./limits";
 import { decodeLivenessParameters, decodeProbe, encodeProbe } from "./liveness";
+import {
+  CORE_DATAGRAM_CAPABILITY_ID,
+  PRP_DATAGRAM_HEADER_BYTES,
+  decodeDatagram,
+  decodeDatagramCapability,
+  encodeDatagram
+} from "./datagram";
 import { ProtocolRuntime } from "./runtime";
-import { RELIABLE_ORDERED_LANE, type ReactiveTransport, type TransportConnection, type TransportLane } from "../transport/types";
+import { BEST_EFFORT_UNORDERED_LANE, RELIABLE_ORDERED_LANE, type ReactiveTransport, type TransportConnection, type TransportLane } from "../transport/types";
 
 const SESSION_ID = "prp.session.id";
 const ERROR_CODE = "prp.error.code";
@@ -38,6 +46,11 @@ export interface StreamMessage {
 export interface SessionSignal {
   readonly data: Uint8Array;
   readonly attributes: readonly ProtocolAttribute[];
+}
+
+/** One native PRP best-effort datagram. Message boundaries are preserved; delivery and ordering are not guaranteed. */
+export interface SessionDatagram {
+  readonly data: Uint8Array;
 }
 
 export type SessionState = "idle" | "connecting" | "ready" | "detached" | "closed";
@@ -59,10 +72,15 @@ export interface ReactiveSession extends AsyncIterable<ReactiveStream> {
   readonly state: SessionState;
   readonly sessionId: string;
   readonly signals: AsyncIterable<SessionSignal>;
+  readonly datagrams: AsyncIterable<SessionDatagram>;
+  /** Maximum application payload that can currently be sent as one native PRP datagram; 0 when unavailable. */
+  readonly maxDatagramBytes: number;
   supports(capabilityId: string): boolean;
   onStateChange(listener: (state: SessionState) => void): () => void;
   open(attributes?: readonly ProtocolAttribute[]): Promise<ReactiveStream>;
   signal(attributes?: readonly ProtocolAttribute[], payload?: Uint8Array): Promise<void>;
+  /** Best-effort/unordered send. Resolution means accepted by the carrier, not delivered or acknowledged. */
+  sendDatagram(data: Uint8Array): Promise<void>;
   close(reason?: string): Promise<void>;
 }
 
@@ -74,6 +92,11 @@ export interface StreamAcceptor {
 export interface SignalAcceptor {
   accepts(signal: SessionSignal): boolean;
   handle(signal: SessionSignal): void | Promise<void>;
+}
+
+export interface DatagramAcceptor {
+  accepts(datagram: SessionDatagram): boolean;
+  handle(datagram: SessionDatagram): void | Promise<void>;
 }
 
 interface ReassemblyState {
@@ -122,6 +145,7 @@ export const SESSION_INTEGRATION = Symbol.for("@byeolnaerim/pure-reactive-protoc
 export interface SessionIntegration {
   registerAcceptor(acceptor: StreamAcceptor): () => void;
   registerSignalAcceptor(acceptor: SignalAcceptor): () => void;
+  registerDatagramAcceptor(acceptor: DatagramAcceptor): () => void;
   capabilities(): CapabilitySet;
 }
 
@@ -313,16 +337,21 @@ class ReactiveStreamImpl implements ReactiveStream {
 class ReactiveSessionImpl implements ReactiveSession {
   private readonly incomingStreams = new AsyncQueue<ReactiveStream>();
   private readonly incomingSignals = new AsyncQueue<QueuedSignal>();
+  private readonly incomingDatagrams = new AsyncQueue<SessionDatagram>();
   private readonly streams = new Map<bigint, StreamState>();
   private readonly retiredStreams = new Map<bigint, boolean>();
   private readonly retiredOrder: bigint[] = [];
   private readonly acceptors = new Set<StreamAcceptor>();
   private readonly signalAcceptors = new Set<SignalAcceptor>();
+  private readonly datagramAcceptors = new Set<DatagramAcceptor>();
   private readonly stateListeners = new Set<(state: SessionState) => void>();
   private readonly extensionDisposers: Array<() => void | Promise<void>> = [];
   private ready = deferred<void>();
   private lane: TransportLane | undefined;
+  private datagramLane: TransportLane | undefined;
   private connection: TransportConnection | undefined;
+  private offeredCapabilities: readonly CapabilityDescriptor[] = [];
+  private remoteMaxInboundDatagramBytes = 0;
   private origin: SessionOrigin | undefined;
   private nextStreamId = 0n;
   private highestRemoteStreamId = 0n;
@@ -349,6 +378,7 @@ class ReactiveSessionImpl implements ReactiveSession {
   readonly [SESSION_INTEGRATION]: SessionIntegration = {
     registerAcceptor: (acceptor) => { this.acceptors.add(acceptor); return () => this.acceptors.delete(acceptor); },
     registerSignalAcceptor: (acceptor) => { this.signalAcceptors.add(acceptor); return () => this.signalAcceptors.delete(acceptor); },
+    registerDatagramAcceptor: (acceptor) => { this.datagramAcceptors.add(acceptor); return () => this.datagramAcceptors.delete(acceptor); },
     capabilities: () => this.negotiated
   };
 
@@ -370,6 +400,13 @@ class ReactiveSessionImpl implements ReactiveSession {
         }
       })
     };
+  }
+
+  get datagrams(): AsyncIterable<SessionDatagram> { return this.incomingDatagrams; }
+  get maxDatagramBytes(): number {
+    if (!this.datagramLane || !this.negotiated.has(CORE_DATAGRAM_CAPABILITY_ID) || this.remoteMaxInboundDatagramBytes <= 0) return 0;
+    const carrierPayloadLimit = Math.max(0, (this.datagramLane.maxFrameBytes ?? Number.MAX_SAFE_INTEGER) - PRP_DATAGRAM_HEADER_BYTES);
+    return Math.min(this.remoteMaxInboundDatagramBytes, carrierPayloadLimit);
   }
 
   supports(capabilityId: string): boolean { return this.negotiated.has(capabilityId); }
@@ -409,13 +446,50 @@ class ReactiveSessionImpl implements ReactiveSession {
       void this.readLoop(this.lane);
       void this.connection.closed.catch(() => {});
 
+      this.datagramLane = undefined;
+      if (this.runtime.datagrams && this.connection.supportsLane?.(BEST_EFFORT_UNORDERED_LANE) === true) {
+        const datagramPromise = this.connection.openLane({
+          ...BEST_EFFORT_UNORDERED_LANE,
+          maxFrameBytes: this.runtime.datagrams.maxInboundBytes + PRP_DATAGRAM_HEADER_BYTES
+        });
+        if (options.signal) {
+          void datagramPromise.then((lane) => {
+            if (options.signal?.aborted) void Promise.resolve(lane.close("aborted")).catch(() => {});
+          }).catch(() => {});
+        }
+        try {
+          this.datagramLane = await waitWithAbort(datagramPromise, options.signal);
+        } catch (error) {
+          if (this.runtime.policy.require?.includes(CORE_DATAGRAM_CAPABILITY_ID)) throw error;
+          this.datagramLane = undefined;
+        }
+      }
+      if (this.runtime.policy.require?.includes(CORE_DATAGRAM_CAPABILITY_ID) && !this.datagramLane) {
+        throw new CapabilityMismatchError("The selected transport does not expose a best-effort/unordered datagram lane required by prp.core.datagram.");
+      }
+      const physicallyAvailable = new Set(this.runtime.capabilities
+        .filter((capability) => capability.id !== CORE_DATAGRAM_CAPABILITY_ID || this.datagramLane !== undefined)
+        .map((capability) => capability.id));
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const extension of this.runtime.extensions) {
+          if (!physicallyAvailable.has(extension.capability.id)) continue;
+          if ((extension.requires ?? []).some((required) => !physicallyAvailable.has(required))) {
+            physicallyAvailable.delete(extension.capability.id);
+            changed = true;
+          }
+        }
+      }
+      this.offeredCapabilities = this.runtime.capabilities.filter((capability) => physicallyAvailable.has(capability.id));
+
       if (options.origin === "initiator") {
         await this.writeFrame({
           kind: FrameKind.HELLO,
           streamId: 0n,
           attributes: [
             attribute(SESSION_ID, this.logicalSessionId, { required: true }),
-            ...capabilitiesToAttributes(this.runtime.capabilities, this.runtime.policy)
+            ...capabilitiesToAttributes(this.offeredCapabilities, this.runtime.policy)
           ]
         });
       }
@@ -479,6 +553,26 @@ class ReactiveSessionImpl implements ReactiveSession {
       ...(signalAttributes.length === 0 ? {} : { attributes: signalAttributes }),
       ...(signalPayload === undefined ? {} : { payload: signalPayload })
     });
+  }
+
+  async sendDatagram(data: Uint8Array): Promise<void> {
+    this.assertReady();
+    if (!(data instanceof Uint8Array)) throw new TypeError("Datagram payload must be a Uint8Array.");
+    const lane = this.datagramLane;
+    const maxPayloadBytes = this.maxDatagramBytes;
+    if (!lane || maxPayloadBytes <= 0 || !this.negotiated.has(CORE_DATAGRAM_CAPABILITY_ID)) {
+      throw new PureReactiveProtocolError("Native PRP datagrams were not negotiated on this transport.", "DATAGRAM_UNAVAILABLE");
+    }
+    if (data.byteLength > maxPayloadBytes) {
+      throw new RangeError(`PRP native datagram exceeds the negotiated/carrier limit of ${maxPayloadBytes} application bytes.`);
+    }
+    const maxFrameBytes = lane.maxFrameBytes ?? maxPayloadBytes + PRP_DATAGRAM_HEADER_BYTES;
+    try {
+      await lane.write(encodeDatagram(data.slice(), maxFrameBytes));
+    } catch (error) {
+      this.disableDatagramLane(lane);
+      throw error;
+    }
   }
 
   async close(reason = "closed"): Promise<void> {
@@ -866,8 +960,9 @@ class ReactiveSessionImpl implements ReactiveSession {
       const attributes = frame.attributes ?? [];
       const remoteSessionId = this.validateHandshakeAttributes(attributes, "HELLO");
       this.logicalSessionId = remoteSessionId;
-      this.negotiated = negotiateCapabilities(this.runtime.capabilities, capabilitiesFromAttributes(attributes), this.runtime.policy);
+      this.negotiated = negotiateCapabilities(this.offeredCapabilities, capabilitiesFromAttributes(attributes), this.runtime.policy);
       this.applyPeerLimits();
+      this.applyDatagramCapability();
       await this.attachExtensions();
       await this.writeFrame({
         kind: FrameKind.WELCOME,
@@ -898,9 +993,10 @@ class ReactiveSessionImpl implements ReactiveSession {
       const attributes = frame.attributes ?? [];
       const echoedSessionId = this.validateHandshakeAttributes(attributes, "WELCOME");
       if (echoedSessionId !== this.logicalSessionId) throw new ProtocolViolationError("WELCOME session id does not match HELLO.");
-      this.negotiated = negotiateCapabilities(this.runtime.capabilities, capabilitiesFromAttributes(attributes), this.runtime.policy);
+      this.negotiated = negotiateCapabilities(this.offeredCapabilities, capabilitiesFromAttributes(attributes), this.runtime.policy);
       for (const required of this.runtime.policy.require ?? []) if (!this.negotiated.has(required)) throw new CapabilityMismatchError(`Required capability was not negotiated: ${required}`);
       this.applyPeerLimits();
+      this.applyDatagramCapability();
       await this.attachExtensions();
       this.transition("ready");
       this.startLiveness();
@@ -947,6 +1043,70 @@ class ReactiveSessionImpl implements ReactiveSession {
     if (!liveness) throw new CapabilityMismatchError(`Required capability was not negotiated: ${CORE_LIVENESS_CAPABILITY_ID}`);
     try { decodeLivenessParameters(liveness.remote.parameters); }
     catch (cause) { throw new ProtocolViolationError("Remote prp.core.liveness parameters are malformed.", { cause }); }
+  }
+
+  private applyDatagramCapability(): void {
+    const capability = this.negotiated.get(CORE_DATAGRAM_CAPABILITY_ID);
+    if (!capability) {
+      const lane = this.datagramLane;
+      this.datagramLane = undefined;
+      this.remoteMaxInboundDatagramBytes = 0;
+      if (lane) void Promise.resolve(lane.close("prp.core.datagram not negotiated")).catch(() => {});
+      return;
+    }
+    if (!this.runtime.datagrams || !this.datagramLane) {
+      throw new CapabilityMismatchError("prp.core.datagram was negotiated without an available native datagram lane.");
+    }
+    try {
+      this.remoteMaxInboundDatagramBytes = decodeDatagramCapability(capability.remote.parameters);
+    } catch (cause) {
+      throw new ProtocolViolationError("Remote prp.core.datagram parameters are malformed.", { cause });
+    }
+    void this.readDatagramLoop(this.datagramLane);
+  }
+
+
+  private disableDatagramLane(lane: TransportLane): void {
+    if (this.datagramLane !== lane) return;
+    this.datagramLane = undefined;
+    this.remoteMaxInboundDatagramBytes = 0;
+    this.incomingDatagrams.end();
+    void Promise.resolve(lane.close("native PRP datagram lane unavailable")).catch(() => {});
+  }
+
+  private async readDatagramLoop(lane: TransportLane): Promise<void> {
+    try {
+      for await (const raw of lane.incoming) {
+        if (this.sessionState === "closed" || this.sessionState === "detached" || this.datagramLane !== lane) return;
+        let data: Uint8Array;
+        try {
+          data = decodeDatagram(raw, this.runtime.datagrams?.maxInboundBytes ?? 0);
+        } catch {
+          // Best-effort lane violations are isolated: drop the datagram, keep reliable PRP alive.
+          continue;
+        }
+        this.lastInboundAt = Date.now();
+        const datagram: SessionDatagram = { data };
+        let handled = false;
+        for (const acceptor of this.datagramAcceptors) {
+          let accepted = false;
+          try { accepted = acceptor.accepts(datagram); } catch { accepted = false; }
+          if (!accepted) continue;
+          handled = true;
+          void Promise.resolve().then(() => acceptor.handle(datagram)).catch(() => {
+            // Datagram/application handler failures are isolated from the reliable session.
+          });
+          break;
+        }
+        if (handled) continue;
+        if (!this.runtime.datagrams || this.incomingDatagrams.size >= this.runtime.datagrams.maxPending) continue;
+        this.incomingDatagrams.push(datagram);
+      }
+    } catch {
+      // Loss of an optional datagram lane must not detach the reliable PRP session.
+    } finally {
+      this.disableDatagramLane(lane);
+    }
   }
 
   private async attachExtensions(): Promise<void> {
@@ -1100,14 +1260,19 @@ class ReactiveSessionImpl implements ReactiveSession {
     for (const streamState of [...this.streams.values()]) this.cancelStream(streamState, failure, false);
     this.incomingStreams.end(undefined, true);
     this.incomingSignals.end(undefined, true);
+    this.incomingDatagrams.end(undefined, true);
     this.pendingSignalBytes = 0;
     const lane = this.lane;
+    const datagramLane = this.datagramLane;
     const connection = this.connection;
     this.lane = undefined;
+    this.datagramLane = undefined;
+    this.remoteMaxInboundDatagramBytes = 0;
     this.connection = undefined;
     this.transition("closed");
     await this.disposeExtensions();
     void Promise.resolve(lane?.close(reason)).catch(() => {});
+    void Promise.resolve(datagramLane?.close(reason)).catch(() => {});
     void Promise.resolve(connection?.close(undefined, reason)).catch(() => {});
   }
 
@@ -1121,14 +1286,19 @@ class ReactiveSessionImpl implements ReactiveSession {
     for (const streamState of [...this.streams.values()]) this.cancelStream(streamState, failure, false);
     this.incomingStreams.end(failure, true);
     this.incomingSignals.end(failure, true);
+    this.incomingDatagrams.end(failure, true);
     this.pendingSignalBytes = 0;
     const lane = this.lane;
+    const datagramLane = this.datagramLane;
     const connection = this.connection;
     this.lane = undefined;
+    this.datagramLane = undefined;
+    this.remoteMaxInboundDatagramBytes = 0;
     this.connection = undefined;
     this.transition("detached");
     void this.disposeExtensions();
     void Promise.resolve(lane?.close("detached")).catch(() => {});
+    void Promise.resolve(datagramLane?.close("detached")).catch(() => {});
     void Promise.resolve(connection?.close(undefined, "detached")).catch(() => {});
   }
 
@@ -1152,6 +1322,7 @@ const internal = (session: ReactiveSession): SessionIntegration => {
 
 export const registerStreamAcceptor = (session: ReactiveSession, acceptor: StreamAcceptor): (() => void) => internal(session).registerAcceptor(acceptor);
 export const registerSignalAcceptor = (session: ReactiveSession, acceptor: SignalAcceptor): (() => void) => internal(session).registerSignalAcceptor(acceptor);
+export const registerDatagramAcceptor = (session: ReactiveSession, acceptor: DatagramAcceptor): (() => void) => internal(session).registerDatagramAcceptor(acceptor);
 export const getNegotiatedCapabilities = (session: ReactiveSession): CapabilitySet => internal(session).capabilities();
 
 export const connectWithRuntime = async (

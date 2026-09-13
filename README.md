@@ -53,7 +53,35 @@ const session = await connect(
 );
 ```
 
-The alpha WebTransport carrier opens exactly one reliable bidirectional stream per session and applies native PRP/1 unsigned 32-bit byte-stream framing. Datagram and multi-lane scheduling are deliberately outside this transport revision.
+The alpha WebTransport carrier exposes two independent native PRP lanes when the browser/peer supports them: one reliable ordered bidirectional stream using PRP/1 unsigned 32-bit byte-stream framing, and one best-effort unordered datagram lane. The datagram lane is negotiated as `prp.core.datagram` v1 and is never emulated over a reliable stream.
+
+```ts
+if (session.supports("prp.core.datagram")) {
+  await session.sendDatagram(positionPacket);
+  for await (const datagram of session.datagrams) {
+    consumeLatestWorldState(datagram.data);
+  }
+}
+```
+
+`session.maxDatagramBytes` is the current application-payload ceiling after intersecting the peer-advertised PRP limit with the physical carrier limit. Datagram delivery, ordering, and uniqueness are not guaranteed, and datagrams are never fragmented by PRP.
+
+### Routed datagrams
+
+Install `datagramRoutingProfile({ routes })` on both peers when application-level datagram routing is needed. The profile negotiates the common route set once, assigns deterministic uint16 route ids, and sends only the numeric id on each datagram. Raw native datagrams remain available for payloads that do not use the routed `PRR1` envelope.
+
+```ts
+const runtime = createRuntime({
+  extensions: [
+    rpcProfile(),
+    datagramRoutingProfile({ routes: ["player.position", "entity.snapshot"] })
+  ]
+});
+
+const datagram = new DatagramPeer(session);
+datagram.route("entity.snapshot", ({ data }) => applySnapshot(data));
+await datagram.sendLatest("player.position", encodePosition(player));
+```
 
 ## RPC/1 is an installed profile
 
@@ -140,7 +168,7 @@ Independent Lab runs have passed browser WebSocket and Node TCP interoperability
 Current transport/adaptation surfaces include:
 
 - WebSocket
-- native PRP/1 over one WebTransport reliable bidirectional stream
+- native PRP/1 over one WebTransport reliable bidirectional stream plus a separately negotiated native datagram lane
 - generic Web `ReadableStream` / `WritableStream`
 - MessagePort / Worker bridging
 - Node TCP/TLS
@@ -149,7 +177,7 @@ Current transport/adaptation surfaces include:
 - in-memory transport for protocol tests
 - RSocket 24-bit-framed WebTransport/byte-stream and Node TCP/TLS compatibility transports
 
-The native core asks for reliable ordered lane semantics, not a transport brand name. WebTransport currently exposes one base lane; negotiated multi-lane scheduling remains a later protocol phase.
+The native core asks for lane semantics, not a transport brand name. Every session needs the reliable ordered base lane. `prp.core.datagram` is advertised only when the physical carrier also exposes a genuine best-effort unordered lane. General priority/multi-lane scheduling beyond this dedicated datagram lane remains a later protocol phase.
 
 ## Resource safety
 

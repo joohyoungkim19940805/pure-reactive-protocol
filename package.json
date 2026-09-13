@@ -43,6 +43,11 @@
       "import": "./dist/profile-rpc.js",
       "require": "./dist/profile-rpc.cjs"
     },
+    "./profile/datagram-routing": {
+      "types": "./dist/profile-datagram-routing.d.ts",
+      "import": "./dist/profile-datagram-routing.js",
+      "require": "./dist/profile-datagram-routing.cjs"
+    },
     "./rxjs": {
       "types": "./dist/rxjs.d.ts",
       "import": "./dist/rxjs.js",

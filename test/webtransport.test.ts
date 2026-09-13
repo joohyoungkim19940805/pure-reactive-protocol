@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { RSocketWebTransportTransport } from "../src/compatibility/rsocket-v1/webtransport";
 import { RSocketLengthPrefixedDecoder } from "../src/compatibility/rsocket-v1/framing";
-import { RELIABLE_ORDERED_LANE } from "../src/transport/types";
+import { BEST_EFFORT_UNORDERED_LANE, RELIABLE_ORDERED_LANE } from "../src/transport/types";
 import { LengthPrefixedFrameDecoder } from "../src/transport/framing";
 import { WebTransportTransport } from "../src/transport/webtransport";
 
@@ -10,10 +10,21 @@ class MockWebTransport {
   readonly ready = Promise.resolve();
   readonly closed = new Promise<WebTransportCloseInfo>(() => {});
   readonly writes: Uint8Array[] = [];
+  readonly datagramWrites: Uint8Array[] = [];
   closeInfo: WebTransportCloseInfo | undefined;
   private controller!: ReadableStreamDefaultController<Uint8Array>;
+  private datagramController!: ReadableStreamDefaultController<Uint8Array>;
   private readonly readable = new ReadableStream<Uint8Array>({ start: (controller) => { this.controller = controller; } });
   private readonly writable = new WritableStream<Uint8Array>({ write: (chunk) => { this.writes.push(chunk.slice()); } });
+  readonly datagrams = {
+    maxDatagramSize: 1200,
+    incomingHighWaterMark: 1,
+    incomingMaxAge: null,
+    outgoingHighWaterMark: 1,
+    outgoingMaxAge: null,
+    readable: new ReadableStream<Uint8Array>({ start: (controller) => { this.datagramController = controller; } }),
+    writable: new WritableStream<Uint8Array>({ write: (chunk) => { this.datagramWrites.push(chunk.slice()); } })
+  } as WebTransportDatagramDuplexStream;
 
   constructor(_url: string | URL, _options?: WebTransportOptions) { MockWebTransport.last = this; }
 
@@ -22,6 +33,7 @@ class MockWebTransport {
   }
 
   push(chunk: Uint8Array): void { this.controller.enqueue(chunk); }
+  pushDatagram(chunk: Uint8Array): void { this.datagramController.enqueue(chunk); }
   close(closeInfo?: WebTransportCloseInfo): void { this.closeInfo = closeInfo; }
 }
 
@@ -45,6 +57,23 @@ describe("WebTransport carriers", () => {
     await expect(next).resolves.toEqual({ done: false, value: frame });
     await connection.close(undefined, "done");
     expect(mock.closeInfo).toEqual({ reason: "done" });
+  });
+
+  it("maps the PRP best-effort lane directly to WebTransport datagrams", async () => {
+    const connection = await new WebTransportTransport("https://localhost/prp", { webTransportCtor: mockCtor }).connect();
+    expect(connection.supportsLane?.(BEST_EFFORT_UNORDERED_LANE)).toBe(true);
+    const lane = await connection.openLane({ ...BEST_EFFORT_UNORDERED_LANE, maxFrameBytes: 1000 });
+    const mock = MockWebTransport.last!;
+    const frame = Uint8Array.of(5, 4, 3, 2, 1);
+
+    expect(lane.maxFrameBytes).toBe(1000);
+    await lane.write(frame);
+    expect(mock.datagramWrites).toEqual([frame]);
+
+    const next = lane.incoming[Symbol.asyncIterator]().next();
+    mock.pushDatagram(frame);
+    await expect(next).resolves.toEqual({ done: false, value: frame });
+    await connection.close(undefined, "done");
   });
 
   it("uses RSocket 24-bit framing over the same WebTransport endpoint", async () => {

@@ -1,6 +1,7 @@
 export * from "./core/attributes";
 export * from "./core/capabilities";
 export * from "./core/codec";
+export * from "./core/datagram";
 export * from "./core/errors";
 export * from "./core/frame";
 export * from "./core/limits";

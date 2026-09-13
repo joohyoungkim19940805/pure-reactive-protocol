@@ -129,18 +129,54 @@ Dynamic pressure controls such as total in-flight reassembly bytes remain local 
 
 `prp.core.liveness` v1 parameters contain peer liveness interval and timeout values. The reference runtime defaults to a 15 second idle probe interval and 45 second timeout. Inbound traffic resets idle observation. A silent peer that does not respond before the negotiated/local timeout is detached with `LIVENESS_TIMEOUT`.
 
-## 9. Profiles
+## 9. Native datagrams
+
+Native PRP may additionally negotiate `prp.core.datagram` version 1 when the physical carrier exposes a genuine best-effort unordered message lane. This capability is optional and is not part of the mandatory PRP/1 base-lane capability set. A transport that has only reliable ordered delivery MUST NOT advertise it.
+
+The v1 capability parameter is a 4-byte unsigned big-endian maximum application datagram payload accepted by the advertising peer. The effective outbound application limit is the minimum of that peer-advertised value and the physical lane limit after the PRP datagram envelope. Public APIs expose this as `maxDatagramBytes`.
+
+A native PRP datagram is exactly one carrier datagram:
+
+| Offset | Bytes | Field |
+|---:|---:|---|
+| 0 | 4 | magic `PRD1` (`0x50524431`) |
+| 4 | n | opaque application payload |
+
+Datagrams do not use the 36-byte PRP/1 reliable-frame header. They have no logical stream ID, reliable-frame sequence, demand credit, fragmentation, retransmission, acknowledgement, or completion semantics. They may be lost, duplicated, or reordered. One datagram is never split by PRP; an oversize send is rejected locally. Malformed/oversize incoming datagrams are dropped without detaching an otherwise valid reliable PRP session. Local receive pressure may also drop datagrams rather than applying reliable backpressure.
+
+Datagram traffic counts as inbound session activity for liveness observation, but loss of the optional datagram lane does not by itself detach the reliable PRP session.
+
+## 10. Profiles
 
 Profiles are not core frame kinds. An implementation installs a profile extension, advertises its capability, attaches behavior after negotiation, and only then exposes the profile API.
 
 `rpc/1` uses capability `prp.profile.rpc` version 1. The capability parameter identifies the payload codec. Both peers must negotiate the profile and identical codec identity before `RpcPeer` is usable.
 
-## 10. Session termination and terminal races
+## 11. Session termination and terminal races
 
 A clean local shutdown sends `CLOSE`. Carrier disappearance without a valid `CLOSE` is attachment loss and enters `detached` rather than being silently reclassified as an application close.
 
 Recent retired streams are tracked with a bounded tombstone set. Stream-ID parity/frontier rules independently prevent ID reuse even after a tombstone ages out. Late idempotent terminal control frames for past IDs are tolerated where they cannot mutate a current stream.
 
-## 11. Continuity
+## 12. Continuity
 
 Logical session identity is conceptually separate from physical attachment identity. Durable replay/resume and live transport migration are intentionally not advertised in `0.0.1-alpha`; they are post-interoperability work.
+
+## Datagram routing profile (`datagram-routing/1`)
+
+`prp.profile.datagram-routing` is an optional profile layered on the native `prp.core.datagram` lane. It MUST NOT be offered when the physical carrier cannot provide the native best-effort/unordered lane.
+
+During capability negotiation each endpoint advertises its supported application route names. Route names are ASCII identifiers matching `[A-Za-z0-9][A-Za-z0-9._/-]*`. Both endpoints compute the sorted intersection and assign uint16 route ids starting at 1; therefore route strings are not repeated on every datagram.
+
+A routed application payload is carried inside the native PRP datagram payload as:
+
+```text
+0               31 32            47 48 ...
++----------------+----------------+------
+| PRR1 magic     | uint16 routeId | data
++----------------+----------------+------
+```
+
+The routed header is 6 bytes. Together with the core `PRD1` envelope, routed native datagrams add 10 bytes before the application payload. Routed datagrams inherit the core datagram semantics: no delivery guarantee, no ordering guarantee, possible duplication, no PRP fragmentation, and no reliable stream id/sequence/demand consumption.
+
+Datagrams that do not begin with a valid negotiated `PRR1` route envelope remain visible through the raw native datagram API. Handler failures are isolated from the reliable PRP session.

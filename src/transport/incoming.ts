@@ -38,6 +38,21 @@ export class IncomingFrameQueue implements AsyncIterable<Uint8Array> {
     this.bufferedBytesValue += value.byteLength;
   }
 
+  /** Best-effort enqueue. Returns false when the bounded backlog is full without failing the queue. */
+  tryPush(value: Uint8Array): boolean {
+    this.assertOpen();
+    if (value.byteLength > this.maxFrameBytes) throw new ProtocolViolationError(`Transport frame exceeds ${this.maxFrameBytes} bytes.`);
+    const waiter = this.waiters.shift();
+    if (waiter) {
+      waiter.resolve({ value, done: false });
+      return true;
+    }
+    if (!this.hasSpace(value.byteLength)) return false;
+    this.values.push(value);
+    this.bufferedBytesValue += value.byteLength;
+    return true;
+  }
+
   async pushWait(value: Uint8Array): Promise<void> {
     this.assertOpen();
     if (value.byteLength > this.maxFrameBytes) throw new ProtocolViolationError(`Transport frame exceeds ${this.maxFrameBytes} bytes.`);

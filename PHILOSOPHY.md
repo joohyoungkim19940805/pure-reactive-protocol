@@ -38,4 +38,4 @@ A library is not simple because it exposes many optional settings with defaults.
 
 ## 9. Future-oriented does not mean speculative API
 
-Resume, migration, multi-lane scheduling, datagrams, compression, and future transports become public only with a real implementation and negotiation/lifecycle rule.
+Resume, migration, general multi-lane scheduling, compression, and future transports become public only with a real implementation and negotiation/lifecycle rule. Native datagrams became public only after gaining an actual best-effort/unordered transport lane, capability negotiation, bounded lifecycle, and tests; they are not a reliable-frame alias.

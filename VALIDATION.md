@@ -51,7 +51,8 @@ The declared npm dependencies were installed and the package's actual toolchain 
 - `tsc --noEmit`: pass;
 - Vitest: 11 files, 51 tests passed;
 - `tsdown`: ESM/CJS declarations and bundles built successfully;
-- WebTransport regressions cover native unsigned 32-bit framing, RSocket unsigned 24-bit framing, single-stream transport traits, and abort cleanup.
+- WebTransport regressions cover native unsigned 32-bit framing, the independent best-effort/unordered datagram lane, RSocket unsigned 24-bit framing, reliable-stream transport traits, and abort cleanup.
+- Native datagram regressions cover capability negotiation, peer/carrier size intersection, best-effort delivery, local oversize rejection, carrier absence, and isolation from reliable stream ids/sequences.
 
 The committed tests also include direct regressions for: native unfragmented item limits, >16 MiB RSocket logical fragmentation, cancellation during fragmentation, PAYLOAD F+C, IGNORE, periodic KEEPALIVE, remote stream-ID skip, local wire-ID rollback, aggregate reassembly pressure, and 31-bit reserved-field rejection.
 

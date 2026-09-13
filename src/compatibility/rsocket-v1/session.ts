@@ -12,6 +12,8 @@ import {
   type ReactiveSession,
   type ReactiveStream,
   type SessionIntegration,
+  type DatagramAcceptor,
+  type SessionDatagram,
   type SessionSignal,
   type SessionState,
   type StreamAcceptor,
@@ -326,8 +328,10 @@ class RSocketReactiveStream implements ReactiveStream {
 export class RSocketCompatibilitySession implements ReactiveSession {
   private readonly incomingStreams = new AsyncQueue<ReactiveStream>();
   private readonly incomingSignals = new AsyncQueue<SessionSignal>();
+  private readonly incomingDatagrams = new AsyncQueue<SessionDatagram>();
   private readonly acceptors = new Set<StreamAcceptor>();
   private readonly signalAcceptors = new Set<SignalAcceptor>();
+  private readonly datagramAcceptors = new Set<DatagramAcceptor>();
   private readonly listeners = new Set<(state: SessionState) => void>();
   private readonly streams = new Map<number, RSocketStreamState>();
   private readonly pendingLocalStreams = new Set<RSocketStreamState>();
@@ -356,6 +360,7 @@ export class RSocketCompatibilitySession implements ReactiveSession {
   readonly [SESSION_INTEGRATION]: SessionIntegration = {
     registerAcceptor: (acceptor) => { this.acceptors.add(acceptor); return () => this.acceptors.delete(acceptor); },
     registerSignalAcceptor: (acceptor) => { this.signalAcceptors.add(acceptor); return () => this.signalAcceptors.delete(acceptor); },
+    registerDatagramAcceptor: (acceptor) => { this.datagramAcceptors.add(acceptor); return () => this.datagramAcceptors.delete(acceptor); },
     capabilities: () => this.capabilitiesValue
   };
 
@@ -365,11 +370,14 @@ export class RSocketCompatibilitySession implements ReactiveSession {
     const compat: CapabilityDescriptor = Object.freeze({ id: RSOCKET_COMPATIBILITY_CAPABILITY_ID, minVersion: 1, maxVersion: 1 });
     const values: NegotiatedCapability[] = [rpc, compat].map((descriptor) => ({ id: descriptor.id, version: 1, local: descriptor, remote: descriptor }));
     this.capabilitiesValue = new CapabilitySet(values);
+    this.incomingDatagrams.end();
   }
 
   get state(): SessionState { return this.sessionState; }
   get sessionId(): string { return this.logicalSessionId; }
   get signals(): AsyncIterable<SessionSignal> { return this.incomingSignals; }
+  get datagrams(): AsyncIterable<SessionDatagram> { return this.incomingDatagrams; }
+  get maxDatagramBytes(): number { return 0; }
   supports(capabilityId: string): boolean { return this.capabilitiesValue.has(capabilityId); }
   onStateChange(listener: (state: SessionState) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   [Symbol.asyncIterator](): AsyncIterator<ReactiveStream> { return this.incomingStreams[Symbol.asyncIterator](); }
@@ -428,6 +436,10 @@ export class RSocketCompatibilitySession implements ReactiveSession {
     const state = this.createState(id, snapshotAttributes(attributes), pattern, true);
     this.pendingLocalStreams.add(state);
     return new RSocketReactiveStream(this, state);
+  }
+
+  async sendDatagram(_data: Uint8Array): Promise<void> {
+    throw new PureReactiveProtocolError("Native PRP datagrams are not available through RSocket compatibility sessions.", "DATAGRAM_UNAVAILABLE");
   }
 
   async signal(attributes: readonly ProtocolAttribute[] = [], payload?: Uint8Array): Promise<void> {

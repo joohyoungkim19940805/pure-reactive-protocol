@@ -66,4 +66,4 @@ Use the results to revisit the 36-byte native PRP/1 header and any allocation ho
 - event-log/cursor profile;
 - compression;
 - application security/authentication profiles where carrier security is insufficient;
-- best-effort datagram semantics only for applications that explicitly tolerate loss/reordering.
+- expand native datagram interoperability/soak coverage across WebTransport implementations and lossy network conditions.

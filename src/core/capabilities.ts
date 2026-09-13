@@ -28,6 +28,8 @@ export interface CapabilityPolicy {
 
 export interface ProtocolExtension {
   readonly capability: CapabilityDescriptor;
+  /** Capabilities that must also be offered/negotiated for this extension to be meaningful. */
+  readonly requires?: readonly string[];
   attach(session: ReactiveSession): void | (() => void | Promise<void>) | Promise<void | (() => void | Promise<void>)>;
 }
 

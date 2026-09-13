@@ -8,6 +8,7 @@ export default defineConfig({
     browser: "src/browser.ts",
     node: "src/node.ts",
     "profile-rpc": "src/profile-rpc.ts",
+    "profile-datagram-routing": "src/profile-datagram-routing.ts",
     rxjs: "src/rxjs.ts",
     "compatibility-rsocket-v1": "src/compatibility-rsocket-v1.ts",
     "compatibility-rsocket-v1-node": "src/compatibility-rsocket-v1-node.ts"
