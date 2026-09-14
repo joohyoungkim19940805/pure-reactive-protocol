@@ -8,4 +8,4 @@ npm version patch
 배포
 npm publish --tag alpha --access public
 
-npm dist-tag add @byeolnaerim/typed-rx-http@<version> latest
+npm dist-tag add @byeolnaerim/pure-reactive-protocol@<version> latest
