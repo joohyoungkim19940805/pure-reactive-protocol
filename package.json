@@ -1,6 +1,6 @@
 {
   "name": "@byeolnaerim/pure-reactive-protocol",
-  "version": "0.0.1-alpha",
+  "version": "0.0.1-alpha1",
   "description": "A transport-independent reactive protocol runtime for browser and Node.js runtimes",
   "license": "Apache-2.0",
   "author": "Joohyoung Kim (@oozu1994)",
