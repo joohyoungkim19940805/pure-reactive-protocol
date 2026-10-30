@@ -4,6 +4,7 @@ export { attribute, attributeText, bytes, text } from "./core/attributes";
 export { CORE_DATAGRAM_CAPABILITY_ID, PRP_DATAGRAM_HEADER_BYTES, PRP_DATAGRAM_MAGIC } from "./core/datagram";
 export type { DatagramOptions, ResolvedDatagramOptions } from "./core/datagram";
 export type { ProtocolAttribute } from "./core/attributes";
+export { CORE_COMPACT_FRAMES_CAPABILITY_ID } from "./core/compact";
 export {
   CapabilityMismatchError,
   ConnectionLostError,

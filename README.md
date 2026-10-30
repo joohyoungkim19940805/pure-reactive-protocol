@@ -42,6 +42,14 @@ for await (const message of stream) {
 
 Native sessions negotiate limits, fragmentation, liveness, and installed optional profiles before becoming ready. Idle healthy sessions are probed automatically; applications do not need a second keepalive API.
 
+### Optional compact headers
+
+Both peers can opt into `createRuntime({ compactFrames: true })` from the `core` entrypoint and use `connectWithRuntime`. This offers `prp.core.compact-frames` version 1. Handshake frames retain PRP/1 framing, and a peer that does not offer the capability continues using the original wire format.
+
+After negotiation, small reliable frames use a four-byte core header instead of the fixed 36-byte header. The header grows with the absolute stream/sequence values. Common attribute names use fixed numeric IDs; unknown names remain valid UTF-8 literals. The native Datagram envelope falls from four bytes to one byte; routed Datagram overhead is seven bytes instead of ten. Application payloads and carrier/TLS/QUIC framing are separate costs. This is an encoding change, not encryption or a claim that total application traffic falls by the header's percentage.
+
+The feature preserves the full uint64 sequence/stream range, demand, fragmentation, cancellation and logical metadata limits. See [the wire specification](PROTOCOL.md#optional-compact-frames-prpcorecompact-frames1) for the negotiated layout and shared Java/TypeScript fixtures.
+
 ### Browser / WebTransport
 
 ```ts

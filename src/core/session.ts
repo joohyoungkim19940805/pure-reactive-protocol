@@ -10,6 +10,7 @@ import {
   type CapabilityDescriptor
 } from "./capabilities";
 import { decodeFrame, encodeFrame, measureAttributeBytes } from "./codec";
+import { CORE_COMPACT_FRAMES_CAPABILITY_ID, PRP_COMPACT_FRAME_MAGIC, decodeCompactFrame, encodeCompactFrame, measureCompactAttributeBytes } from "./compact";
 import {
   CapabilityMismatchError,
   ConnectionLostError,
@@ -24,6 +25,7 @@ import { decodeLivenessParameters, decodeProbe, encodeProbe } from "./liveness";
 import {
   CORE_DATAGRAM_CAPABILITY_ID,
   PRP_DATAGRAM_HEADER_BYTES,
+  PRP_COMPACT_DATAGRAM_HEADER_BYTES,
   decodeDatagram,
   decodeDatagramCapability,
   encodeDatagram
@@ -405,7 +407,8 @@ class ReactiveSessionImpl implements ReactiveSession {
   get datagrams(): AsyncIterable<SessionDatagram> { return this.incomingDatagrams; }
   get maxDatagramBytes(): number {
     if (!this.datagramLane || !this.negotiated.has(CORE_DATAGRAM_CAPABILITY_ID) || this.remoteMaxInboundDatagramBytes <= 0) return 0;
-    const carrierPayloadLimit = Math.max(0, (this.datagramLane.maxFrameBytes ?? Number.MAX_SAFE_INTEGER) - PRP_DATAGRAM_HEADER_BYTES);
+    const headerBytes = this.negotiated.has(CORE_COMPACT_FRAMES_CAPABILITY_ID) ? PRP_COMPACT_DATAGRAM_HEADER_BYTES : PRP_DATAGRAM_HEADER_BYTES;
+    const carrierPayloadLimit = Math.max(0, (this.datagramLane.maxFrameBytes ?? Number.MAX_SAFE_INTEGER) - headerBytes);
     return Math.min(this.remoteMaxInboundDatagramBytes, carrierPayloadLimit);
   }
 
@@ -568,7 +571,7 @@ class ReactiveSessionImpl implements ReactiveSession {
     }
     const maxFrameBytes = lane.maxFrameBytes ?? maxPayloadBytes + PRP_DATAGRAM_HEADER_BYTES;
     try {
-      await lane.write(encodeDatagram(data.slice(), maxFrameBytes));
+      await lane.write(encodeDatagram(data.slice(), maxFrameBytes, this.negotiated.has(CORE_COMPACT_FRAMES_CAPABILITY_ID)));
     } catch (error) {
       this.disableDatagramLane(lane);
       throw error;
@@ -616,7 +619,9 @@ class ReactiveSessionImpl implements ReactiveSession {
       );
     }
 
-    const attributeBytes = measureAttributeBytes(attributes, this.outboundLimits);
+    const legacyAttributeBytes = measureAttributeBytes(attributes, this.outboundLimits);
+    const attributeBytes = this.negotiated.has(CORE_COMPACT_FRAMES_CAPABILITY_ID)
+      ? Math.max(legacyAttributeBytes, measureCompactAttributeBytes(attributes, this.outboundLimits)) : legacyAttributeBytes;
     const firstPayloadCapacity = this.outboundLimits.maxFrameBytes - FRAME_HEADER_BYTES - attributeBytes;
     if (firstPayloadCapacity < 0) throw new RangeError(`DATA attributes do not fit the negotiated ${this.outboundLimits.maxFrameBytes}-byte frame limit.`);
 
@@ -726,7 +731,9 @@ class ReactiveSessionImpl implements ReactiveSession {
     const complete: ProtocolFrame = { ...frame, sequence: this.outgoingSequence };
     const bootstrapFrame = frame.kind === FrameKind.HELLO || frame.kind === FrameKind.WELCOME ||
       (frame.kind === FrameKind.ERROR && frame.streamId === 0n && this.sessionState === "connecting");
-    const encoded = encodeFrame(complete, bootstrapFrame ? BOOTSTRAP_PROTOCOL_LIMITS : this.outboundLimits);
+    const encoded = !bootstrapFrame && this.sessionState === "ready" && this.negotiated.has(CORE_COMPACT_FRAMES_CAPABILITY_ID)
+      ? encodeCompactFrame(complete, this.outboundLimits)
+      : encodeFrame(complete, bootstrapFrame ? BOOTSTRAP_PROTOCOL_LIMITS : this.outboundLimits);
     try {
       await this.lane.write(encoded);
       this.outgoingSequence += 1n;
@@ -811,7 +818,10 @@ class ReactiveSessionImpl implements ReactiveSession {
   private async readLoop(lane: TransportLane): Promise<void> {
     try {
       for await (const raw of lane.incoming) {
-        const frame = decodeFrame(raw, this.sessionState === "connecting" ? BOOTSTRAP_PROTOCOL_LIMITS : this.runtime.limits);
+        const compact = this.sessionState === "ready" && this.negotiated.has(CORE_COMPACT_FRAMES_CAPABILITY_ID);
+        if (!compact && raw[0] === PRP_COMPACT_FRAME_MAGIC) throw new ProtocolViolationError("Compact PRP frames were not negotiated for this ready session.");
+        const frame = compact ? decodeCompactFrame(raw, this.runtime.limits)
+          : decodeFrame(raw, this.sessionState === "connecting" ? BOOTSTRAP_PROTOCOL_LIMITS : this.runtime.limits);
         if (frame.sequence !== this.expectedIncomingSequence) throw new ProtocolViolationError(`Expected peer sequence ${this.expectedIncomingSequence}, received ${frame.sequence}.`);
         this.expectedIncomingSequence += 1n;
         this.lastInboundAt = Date.now();
@@ -1080,7 +1090,7 @@ class ReactiveSessionImpl implements ReactiveSession {
         if (this.sessionState === "closed" || this.sessionState === "detached" || this.datagramLane !== lane) return;
         let data: Uint8Array;
         try {
-          data = decodeDatagram(raw, this.runtime.datagrams?.maxInboundBytes ?? 0);
+          data = decodeDatagram(raw, this.runtime.datagrams?.maxInboundBytes ?? 0, this.negotiated.has(CORE_COMPACT_FRAMES_CAPABILITY_ID));
         } catch {
           // Best-effort lane violations are isolated: drop the datagram, keep reliable PRP alive.
           continue;

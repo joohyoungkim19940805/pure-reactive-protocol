@@ -10,6 +10,7 @@ import {
 import { encodePeerProtocolLimits, resolveProtocolLimits, type ProtocolLimits } from "./limits";
 import { encodeLivenessParameters, resolveLiveness, type LivenessOptions, type ResolvedLivenessOptions } from "./liveness";
 import { CORE_DATAGRAM_CAPABILITY_ID, encodeDatagramCapability, resolveDatagramOptions, type DatagramOptions, type ResolvedDatagramOptions } from "./datagram";
+import { CORE_COMPACT_FRAMES_CAPABILITY_ID } from "./compact";
 
 export interface RuntimeOptions {
   readonly extensions?: readonly ProtocolExtension[];
@@ -19,6 +20,8 @@ export interface RuntimeOptions {
   readonly liveness?: LivenessOptions;
   /** Native PRP best-effort datagrams. Enabled by default when the carrier exposes a matching lane. */
   readonly datagrams?: DatagramOptions | false;
+  /** Offer negotiated compact reliable/native headers; legacy peers retain PRP/1 framing. */
+  readonly compactFrames?: boolean;
 }
 
 export const DEFAULT_HANDSHAKE_TIMEOUT_MS = 30_000;
@@ -31,11 +34,13 @@ export class ProtocolRuntime {
   readonly handshakeTimeoutMs: number;
   readonly liveness: Readonly<ResolvedLivenessOptions>;
   readonly datagrams: Readonly<ResolvedDatagramOptions> | undefined;
+  readonly compactFrames: boolean;
 
   constructor(options: RuntimeOptions = {}) {
     this.limits = resolveProtocolLimits(options.limits);
     this.liveness = resolveLiveness(options.liveness);
     this.datagrams = options.datagrams === false ? undefined : resolveDatagramOptions(options.datagrams);
+    this.compactFrames = options.compactFrames ?? false;
     this.handshakeTimeoutMs = options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
     if (!Number.isSafeInteger(this.handshakeTimeoutMs) || this.handshakeTimeoutMs <= 0) {
       throw new RangeError("handshakeTimeoutMs must be a positive safe integer.");
@@ -51,6 +56,7 @@ export class ProtocolRuntime {
       maxVersion: 1,
       parameters: encodeDatagramCapability(this.datagrams.maxInboundBytes)
     }] : [];
+    if (this.compactFrames) optionalCoreCapabilities.push({ id: CORE_COMPACT_FRAMES_CAPABILITY_ID, minVersion: 1, maxVersion: 1 });
     const extensions = [...(options.extensions ?? [])];
     const extensionCapabilities = extensions.map((extension) => {
       if (typeof extension.attach !== "function") throw new TypeError(`Protocol extension ${extension.capability.id} must implement attach(session).`);

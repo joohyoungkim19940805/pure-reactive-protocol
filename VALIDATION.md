@@ -79,3 +79,9 @@ npm run build:wasm
 `cargo`, `rustc`, and `wasm-pack` are unavailable in this environment, so the Rust/Wasm validator source can be kept aligned but was not compiled here.
 
 After that gate is green, execute the remaining interoperability matrix in `ROADMAP.md`. Only after those tests and the later performance/soak phase should the package drop the alpha label.
+
+## Optional compact-header validation
+
+`test/compact.test.ts` checks the shared Java/TypeScript golden fixture bytes, exact layer sizes for every payload length from 1 through 1,100 bytes, full uint64 IDs/sequences, canonical varints, malformed UTF-8 and metadata limits. It also exercises actual in-memory session negotiation, legacy fallback, compact-before-handshake rejection, demand/cancellation, compact item fragmentation, duplicate sequence rejection and wrong-mode native Datagram isolation. The compact file contains 21 passing tests. After the source and package version were updated to `0.0.1-alpha2`, `npm run typecheck` and the complete Vitest suite passed: 14 files, 81 tests. The package build/pack gate remains `npm run build` followed by `npm pack --ignore-scripts`; no package was published during this implementation.
+
+These are codec and in-memory runtime tests, not network throughput measurements. No TLS/QUIC speedup or game capacity follows from a byte-count comparison. The independent Rust/Wasm `validate_frame` remains a legacy PRP/1 validator; the JavaScript runtime does not invoke it for compact frames.

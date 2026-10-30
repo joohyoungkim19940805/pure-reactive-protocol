@@ -180,3 +180,50 @@ A routed application payload is carried inside the native PRP datagram payload a
 The routed header is 6 bytes. Together with the core `PRD1` envelope, routed native datagrams add 10 bytes before the application payload. Routed datagrams inherit the core datagram semantics: no delivery guarantee, no ordering guarantee, possible duplication, no PRP fragmentation, and no reliable stream id/sequence/demand consumption.
 
 Datagrams that do not begin with a valid negotiated `PRR1` route envelope remain visible through the raw native datagram API. Handler failures are isolated from the reliable PRP session.
+
+## Optional compact frames (`prp.core.compact-frames/1`)
+
+This optional capability is offered only with `RuntimeOptions.compactFrames: true`; it is not mandatory for PRP/1. Both peers must negotiate version 1. HELLO, WELCOME and negotiation-scoped session ERROR always retain the original bounded PRP/1 bootstrap encoding. Their existing frame-kind values are already one-byte codes. The compact capability adds a one-time handshake offer rather than changing the handshake vocabulary.
+
+After the session becomes ready, both directions use compact reliable frames if negotiated. A compact frame before readiness or without agreement is a protocol violation. A legacy reliable frame after compact mode is active is also a protocol violation. With one or both peers opting out, both directions retain the original PRP/1 encoding.
+
+| Order | Field |
+| --- | --- |
+| 1 | one-byte marker `0xC1` |
+| 2 | one-byte control: low five bits retain the PRP frame kind; `0x20` means attributes; `0x40` means a header value; `0x80` represents DATA's fragmented flag |
+| 3 | unsigned LEB128 absolute uint64 stream ID |
+| 4 | unsigned LEB128 absolute uint64 peer sequence |
+| 5 | unsigned LEB128 uint32 header value, only when `0x40` is set: DEMAND credit or fragmented DATA's total length |
+| 6 | compact attributes when `0x20` is set |
+| 7 | the remaining frame bytes are the unmodified payload |
+
+All varints use the shortest representation; overlong, truncated and overflowing values are rejected. Sequence zero remains invalid. HELLO/WELCOME have no compact representation. Existing frame-shape rules, stream parity, peer sequence validation, demand and cancellation still apply. No sequence precision is discarded and no stateful sequence delta is required.
+
+Compact attributes start with a nonzero uint32 varint count. Each entry is `tag`, an optional literal ID, then `valueLength` and raw value bytes. `tag` is a uint32 varint `(dictionaryId << 1) | requiredBit`. The fixed version-1 dictionary is:
+
+| Dictionary ID | Attribute ID |
+| ---: | --- |
+| 1 | `prp.profile` |
+| 2 | `prp.rpc.target` |
+| 3 | `prp.rpc.pattern` |
+| 4 | `prp.error.code` |
+| 5 | `prp.session.id` |
+
+Dictionary ID zero escapes to `uint32 varint idByteLength` followed by the nonempty UTF-8 ID. Other dictionary IDs are rejected. `valueLength` is a uint32 varint and values remain opaque bytes. Attribute count, individual lengths, and the logical original TLV cost `7 + utf8IdBytes + valueBytes` are checked against the existing metadata limits, so dictionary compression cannot bypass resource budgets. The physical frame is separately checked against the negotiated frame limit. Fragmentation conservatively reserves the original 36-byte header and the larger of the legacy/compact attribute encodings.
+
+The same negotiated capability changes the native Datagram envelope from `PRD1` (four bytes) to marker `0xD1` (one byte) followed by the unchanged payload. A wrong-mode native packet is dropped without detaching the reliable session. The six-byte `PRR1` routed envelope remains unchanged, so total native+routing overhead changes from ten bytes to seven. The route-name dictionary is already negotiated by `datagram-routing/1` and is not repeated per packet.
+
+Exact examples below exclude carrier length prefixes, TLS/QUIC and application-specific headers:
+
+| Example | Legacy bytes | Compact bytes |
+| --- | ---: | ---: |
+| DATA, stream 1, sequence 2, 16-byte payload | 52 | 20 |
+| RPC OPEN, `hunter.world.watch` / `rpc/1` / `server-stream`, three required attributes | 133 | 47 |
+| Raw native Datagram with 16-byte payload | 20 | 17 |
+| Routed native Datagram with 16-byte application payload | 26 | 23 |
+
+The exact-size regression checks every payload length from 1 through 1,100 bytes. For the same small IDs, DATA with a 1-byte payload is 37/5 bytes (legacy/compact), and with 1,100 payload bytes is 1,136/1,104 bytes. Routed native Datagrams with those payloads are 11/8 and 1,110/1,107 bytes respectively. Thus the native saving is three bytes per packet even when the application payload grows; the much larger 36-to-4 header reduction belongs to reliable frames.
+
+Absolute IDs/sequences above 127 need more varint bytes, so the four-byte reliable header is a minimum, not a fixed promise. The reliable carrier's four-byte length prefix is unchanged. This encoding is not encryption. It does not compress JSON or game simulation data and does not establish a runtime throughput claim.
+
+[Shared compact fixtures](compatibility/fixtures/compact-frames-v1.json) specify exact Java/TypeScript bytes, including non-ASCII unknown attributes and fragmentation.

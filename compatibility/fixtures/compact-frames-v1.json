@@ -1,0 +1,19 @@
+{
+  "capability": "prp.core.compact-frames",
+  "version": 1,
+  "vectors": [
+    { "name": "data", "kind": "DATA", "streamId": "1", "sequence": "2", "payloadHex": "010203", "wireHex": "c1110102010203" },
+    { "name": "demand", "kind": "DEMAND", "streamId": "300", "sequence": "128", "credit": 500, "wireHex": "c152ac028001f403" },
+    { "name": "fragmented-data", "kind": "DATA", "streamId": "1", "sequence": "3", "flags": 1, "fragmentLength": 300, "payloadHex": "0102", "wireHex": "c1d10103ac020102" },
+    { "name": "close", "kind": "CLOSE", "streamId": "0", "sequence": "4", "wireHex": "c1030004" },
+    { "name": "rpc-open", "kind": "OPEN", "streamId": "1", "sequence": "2", "attributes": [
+      { "id": "prp.profile", "valueHex": "7270632f31", "required": true },
+      { "id": "prp.rpc.target", "valueHex": "68756e7465722e776f726c642e7761746368", "required": true },
+      { "id": "prp.rpc.pattern", "valueHex": "7365727665722d73747265616d", "required": true }
+    ], "wireHex": "c13001020303057270632f31051268756e7465722e776f726c642e7761746368070d7365727665722d73747265616d" },
+    { "name": "unknown-utf8-attribute", "kind": "SIGNAL", "streamId": "0", "sequence": "129", "attributes": [
+      { "id": "☃", "valueHex": "0102" }
+    ], "payloadHex": "09", "wireHex": "c136008101010003e2988302010209" }
+  ],
+  "nativeDatagram": { "payloadHex": "010203", "wireHex": "d1010203" }
+}

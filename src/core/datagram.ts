@@ -3,6 +3,8 @@ import { ProtocolViolationError } from "./errors";
 export const CORE_DATAGRAM_CAPABILITY_ID = "prp.core.datagram";
 export const PRP_DATAGRAM_MAGIC = 0x50524431; // "PRD1"
 export const PRP_DATAGRAM_HEADER_BYTES = 4;
+export const PRP_COMPACT_DATAGRAM_MAGIC = 0xd1;
+export const PRP_COMPACT_DATAGRAM_HEADER_BYTES = 1;
 
 export interface DatagramOptions {
   /** Maximum application payload bytes accepted from one native PRP datagram. */
@@ -48,21 +50,24 @@ export const decodeDatagramCapability = (value: Uint8Array | undefined): number 
 };
 
 /** Compact PRP native datagram envelope. Datagram message boundaries are provided by the carrier. */
-export const encodeDatagram = (payload: Uint8Array, maxFrameBytes = Number.MAX_SAFE_INTEGER): Uint8Array => {
+export const encodeDatagram = (payload: Uint8Array, maxFrameBytes = Number.MAX_SAFE_INTEGER, compact = false): Uint8Array => {
   if (!(payload instanceof Uint8Array)) throw new TypeError("Datagram payload must be a Uint8Array.");
-  const frameBytes = PRP_DATAGRAM_HEADER_BYTES + payload.byteLength;
+  const headerBytes = compact ? PRP_COMPACT_DATAGRAM_HEADER_BYTES : PRP_DATAGRAM_HEADER_BYTES;
+  const frameBytes = headerBytes + payload.byteLength;
   if (frameBytes > maxFrameBytes) throw new RangeError(`PRP datagram exceeds the carrier limit of ${maxFrameBytes} bytes.`);
   const output = new Uint8Array(frameBytes);
-  new DataView(output.buffer).setUint32(0, PRP_DATAGRAM_MAGIC);
-  output.set(payload, PRP_DATAGRAM_HEADER_BYTES);
+  if (compact) output[0] = PRP_COMPACT_DATAGRAM_MAGIC;
+  else new DataView(output.buffer).setUint32(0, PRP_DATAGRAM_MAGIC);
+  output.set(payload, headerBytes);
   return output;
 };
 
-export const decodeDatagram = (frame: Uint8Array, maxPayloadBytes: number): Uint8Array => {
-  if (frame.byteLength < PRP_DATAGRAM_HEADER_BYTES) throw new ProtocolViolationError("Truncated PRP native datagram.");
+export const decodeDatagram = (frame: Uint8Array, maxPayloadBytes: number, compact = false): Uint8Array => {
+  const headerBytes = compact ? PRP_COMPACT_DATAGRAM_HEADER_BYTES : PRP_DATAGRAM_HEADER_BYTES;
+  if (frame.byteLength < headerBytes) throw new ProtocolViolationError("Truncated PRP native datagram.");
   const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
-  if (view.getUint32(0) !== PRP_DATAGRAM_MAGIC) throw new ProtocolViolationError("Invalid PRP native datagram magic.");
-  const payloadBytes = frame.byteLength - PRP_DATAGRAM_HEADER_BYTES;
+  if (compact ? frame[0] !== PRP_COMPACT_DATAGRAM_MAGIC : view.getUint32(0) !== PRP_DATAGRAM_MAGIC) throw new ProtocolViolationError("Invalid PRP native datagram magic.");
+  const payloadBytes = frame.byteLength - headerBytes;
   if (payloadBytes > maxPayloadBytes) throw new ProtocolViolationError(`PRP native datagram exceeds ${maxPayloadBytes} application bytes.`);
-  return frame.slice(PRP_DATAGRAM_HEADER_BYTES);
+  return frame.slice(headerBytes);
 };
