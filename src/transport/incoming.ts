@@ -66,6 +66,12 @@ export class IncomingFrameQueue implements AsyncIterable<Uint8Array> {
       this.spaceWaiters.push(space);
       await space.promise;
       this.assertOpen();
+      // A consumer may have started waiting while this producer was suspended.
+      const resumedWaiter = this.waiters.shift();
+      if (resumedWaiter) {
+        resumedWaiter.resolve({ value, done: false });
+        return;
+      }
     }
     this.values.push(value);
     this.bufferedBytesValue += value.byteLength;
