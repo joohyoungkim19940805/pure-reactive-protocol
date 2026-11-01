@@ -85,3 +85,21 @@ After that gate is green, execute the remaining interoperability matrix in `ROAD
 `test/compact.test.ts` checks the shared Java/TypeScript golden fixture bytes, exact layer sizes for every payload length from 1 through 1,100 bytes, full uint64 IDs/sequences, canonical varints, malformed UTF-8 and metadata limits. It also exercises actual in-memory session negotiation, legacy fallback, compact-before-handshake rejection, demand/cancellation, compact item fragmentation, duplicate sequence rejection and wrong-mode native Datagram isolation. The compact file contains 21 passing tests. After the source and package version were updated to `0.0.1-alpha2`, `npm run typecheck` and the complete Vitest suite passed: 14 files, 81 tests. The package build/pack gate remains `npm run build` followed by `npm pack --ignore-scripts`; no package was published during this implementation.
 
 These are codec and in-memory runtime tests, not network throughput measurements. No TLS/QUIC speedup or game capacity follows from a byte-count comparison. The independent Rust/Wasm `validate_frame` remains a legacy PRP/1 validator; the JavaScript runtime does not invoke it for compact frames.
+
+## Queue backpressure regression validation — 2026-11-01
+
+`test/queue-concurrency.test.ts` adds eight queue regressions. A producer that
+resumes after waiting for transport backlog capacity must serve any consumer
+that started waiting during that suspension. Otherwise, overlapping `next()`
+calls can observe A/C/B even when B was accepted before C was submitted.
+
+The regression reproduces on the preceding alpha2 implementation and passes
+with the consumer handoff fix. The installed alpha2 ESM/CJS builds and Chromium
+154 reproduce the same ordering failure; locally packed fixed builds preserve
+A/B/C. Sequential consumption of 1,000 frames passes on both implementations.
+
+On the source-controlled queue-fix revision, `npm run check` passes type checking,
+all 15 files / 89 tests, and ESM/CJS builds. Additional local session/transport
+audit tests are separate from that committed suite. The fix changes neither the
+public API nor the wire format. These results establish queue correctness under
+backpressure; they do not establish network throughput or connection capacity.
